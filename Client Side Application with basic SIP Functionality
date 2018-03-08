@@ -1,0 +1,150 @@
+import sys
+#Importing version 2.0.1 of pjsip
+import pjsua as pj
+
+LOG_LEVEL=3 #Increasing the log level to capture error details and data
+
+current_call_position = None
+
+def callagain(level, str, len):
+    print str
+
+# Callback from account for the purpose of receiving events
+class SelfCallback(pj.AccountCallback):
+    sem= None #Initializing the value to NULL
+
+    def init(self, account=None):
+        pj.AccountCallback.init(self, account)
+
+    def on_reg_state(self):
+        if self.sem: #when value found
+            if self.account.info().reg_status >= 200:
+self.sem.release() #release operation performed
+
+    # Notify on incoming call
+    def incoming_call(self, call):
+        global current_call_position #making the variable available throughout the program
+        #Test condition
+        if current_call_position:
+            call.answer(486, "Busy")  #Busy passed as an argument
+            return   #return back after operation
+            
+        print "Incoming call from \n", call.info().remote_uri
+        print "Type 1 to answer\n"
+
+        current_call_position = call
+        #Initislie to call to perform call related operations
+        call_cb = MyCallreturn(current_call_position)
+        current_call_position.set_callback(call_cb)
+
+	#instruction for ringing operation with argument as 180
+        current_call_position.answer(180)
+
+class MyCallreturn(pj.CallCallback):
+def init(self, call=None):
+        pj.CallCallback.init(self, call)
+
+    # Notify when call state has changed
+    def on_state(self):
+        global current_call_position
+        #made the current_call_position available for use throughout the program
+        print "Call with", self.call.info().remote_uri,
+        print "is", self.call.info().state_text,
+        print "last code =", self.call.info().last_code, 
+        print "(" + self.call.info().last_reason + ")"
+ 
+
+    # Here when the call's media state is changed, the user is notified of it.
+    def on_media_state(self):
+        if self.call.info().media_state == pj.MediaState.ACTIVE:
+            # Connect the call to sound device
+            call_slot = self.call.info().conf_slot
+            pj.Lib.instance().conf_connect(call_slot, 0)
+            pj.Lib.instance().conf_connect(0, call_slot)
+            
+        else:
+            print "Media is not active"
+def call_made(uri):
+    try:
+        print "Making call to", uri
+        return acc.call_made(uri, cb=MyCallreturn())
+    #when there is an error, print with the below exception message
+    except pj.Error, e:
+        print "Exception occurred: "+str(e)
+        return None
+        
+# All library instances created:
+lib = pj.Lib()
+try:
+    lib.init(log_cfg = pj.LogConfig(level=LOG_LEVEL, callback=callagain))
+    tran_conf = pj.TransportConfig()
+    # Configurtion of one Transport Object done above
+    tran_conf.bound_addr = "192.168.100.50"
+    # IP address of PJSIP client given
+    transport = lib.create_transport(pj.TransportType.UDP,pj.TransportConfig(0))
+    print "Listening to", transport.info().host, "\n"
+
+    # Start the library
+    lib.start()
+    # Configuring Account class with Registrar server
+    acc_conf = pj.AccountConfig(domain = '192.168.100.50', username = '2050', password = 'password', display = '2050', registrar = 'sip:192.168.100.1', proxy = 'sip:192.168.100.1')
+    #provide the sip id
+    acc_conf.id = "sip:2050"
+    #provide the host id
+    acc_conf.reg_uri = "sip:192.168.100.1"
+
+    # Creating account
+    acc = lib.create_account(acc_conf)
+    cb = SelfCallback(acc)
+    acc.set_callback(cb)
+
+    if len(sys.argv) > 1:
+        lck = lib.auto_lock() #auto lock assigned to lck
+        current_call_position = call_made(sys.argv[1])
+        print 'Current call here:', current_call_position
+        del lck #deleting the lock
+
+    SipUri_mine = "sip:" + transport.info().host + ":" + str(transport.info().port)
+    while True: #while (1)
+        print "SIP URI\n :", SipUri_mine
+        print "\nPress:1 to answer\n\n2 to hangup\n\n3 to make call\n\n4 to quit\n\n"
+        inp = sys.stdin.readline().rstrip("\r\n")
+        #test conditions
+        if inp == "3'":
+            if current_call_position:
+                print "Currently held in other call"
+                continue #continue the operation till the value gors false
+            print "Enter destination URI",
+            inp = sys.stdin.readline().rstrip("\r\n")
+            #check next case
+            if inp == "":
+                continue
+            lck = lib.auto_lock()
+            current_call_position = call_made(inp)
+            del lck
+
+        elif inp == "2":
+            if not current_call_position:
+                print "no call\n"
+                continue
+            current_call_position.hangup()
+
+        elif inp == "1":
+            if not current_call_position:
+                print "no call\n"
+                continue
+            current_call_position.answer(200)
+
+        elif inp == "4":
+	         print "Shut down. This is the end"
+             break
+    transport = None
+    acc.delete()
+    acc = None
+    lib.destroy() # Shutdown the library
+    lib = None
+#when error print with the exception message
+except pj.Error, e:
+    print "Exception: " + str(e)
+    lib.destroy()
+lib = None
